@@ -6,3 +6,5 @@ credentials.enc
 .mcp.json
 .mcpregistry_*
 config/
+
+.infisical.json
