@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import type { gmail_v1 } from 'googleapis';
@@ -78,25 +79,41 @@ export class GmailAdapter implements EmailProvider {
     const gmail = this.ensureConnected();
     const q = buildGmailQuery(query);
 
-    const params: any = {
-      userId: 'me',
-      maxResults: query.limit || 20,
-    };
+    const limit = query.limit || 20;
+    const offset = query.offset || 0;
+    const needed = offset + limit;
 
-    if (q) params.q = q;
-    if (query.folder) params.labelIds = [query.folder];
+    // Gmail's API has no numeric offset — only an opaque pageToken cursor.
+    // To honor `offset`, page forward through the lightweight message-id list
+    // until we have collected `offset + limit` ids, then take the window.
+    // Only the final window incurs the expensive per-message `get`.
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const params: any = {
+        userId: 'me',
+        maxResults: Math.min(500, needed - ids.length),
+      };
+      if (q) params.q = q;
+      if (query.folder) params.labelIds = [query.folder];
+      if (pageToken) params.pageToken = pageToken;
 
-    const res = await gmail.users.messages.list(params);
-    const messages = res.data.messages || [];
+      const res = await gmail.users.messages.list(params);
+      for (const msg of res.data.messages || []) {
+        if (msg.id) ids.push(msg.id);
+      }
+      pageToken = res.data.nextPageToken || undefined;
+    } while (pageToken && ids.length < needed);
 
-    if (messages.length === 0) return [];
+    const windowIds = ids.slice(offset, offset + limit);
+    if (windowIds.length === 0) return [];
 
-    // Fetch full message details for each result
+    // Fetch full message details for each result in the window
     const emails: Email[] = [];
-    for (const msg of messages) {
+    for (const id of windowIds) {
       const full = await gmail.users.messages.get({
         userId: 'me',
-        id: msg.id!,
+        id,
         format: 'full',
       });
       emails.push(mapGmailMessage(full.data, this.accountId));
@@ -403,6 +420,49 @@ export class GmailAdapter implements EmailProvider {
     }
 
     return result;
+  }
+
+  async getRawMessage(emailId: string, _sourceFolder?: string): Promise<Buffer> {
+    const gmail = this.ensureConnected();
+    const res = await gmail.users.messages.get({
+      userId: 'me',
+      id: emailId,
+      format: 'raw',
+    });
+    return Buffer.from(res.data.raw || '', 'base64url');
+  }
+
+  async appendRawMessage(
+    raw: Buffer,
+    targetFolder?: string,
+    flags?: { read?: boolean; starred?: boolean },
+  ): Promise<{ id: string }> {
+    const gmail = this.ensureConnected();
+
+    const labelIds: string[] = [];
+    labelIds.push(targetFolder ? await this.resolveLabelId(targetFolder) : 'INBOX');
+    if (flags?.read === false) labelIds.push('UNREAD');
+    if (flags?.starred === true) labelIds.push('STARRED');
+
+    const res = await gmail.users.messages.insert({
+      userId: 'me',
+      internalDateSource: 'dateHeader',
+      requestBody: { labelIds },
+      media: { mimeType: 'message/rfc822', body: Readable.from(raw) },
+    });
+    return { id: res.data.id || '' };
+  }
+
+  /** Resolve a Gmail label name or id to a label id (accepts either). */
+  private async resolveLabelId(nameOrId: string): Promise<string> {
+    const gmail = this.ensureConnected();
+    const res = await gmail.users.labels.list({ userId: 'me' });
+    const labels = res.data.labels || [];
+    const byId = labels.find((l) => l.id === nameOrId);
+    if (byId?.id) return byId.id;
+    const byName = labels.find((l) => (l.name || '').toLowerCase() === nameOrId.toLowerCase());
+    if (byName?.id) return byName.id;
+    return nameOrId; // assume it is already a valid label id
   }
 
   async addLabels(emailId: string, labels: string[]): Promise<void> {

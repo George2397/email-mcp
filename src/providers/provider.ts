@@ -49,6 +49,16 @@ export interface EmailProvider {
   batchMove?(emailIds: string[], targetFolder: string, sourceFolder?: string): Promise<BatchResult>;
   batchMark?(emailIds: string[], flags: { read?: boolean; starred?: boolean; flagged?: boolean }, sourceFolder?: string): Promise<BatchResult>;
 
+  // Raw MIME transfer primitives (used for cross-account moves).
+  // getRawMessage returns the full RFC822 message bytes.
+  // appendRawMessage imports raw RFC822 bytes into the account, returning the new id.
+  getRawMessage?(emailId: string, sourceFolder?: string): Promise<Buffer>;
+  appendRawMessage?(
+    raw: Buffer,
+    targetFolder?: string,
+    flags?: { read?: boolean; starred?: boolean },
+  ): Promise<{ id: string }>;
+
   // Provider-specific (optional)
   addLabels?(emailId: string, labels: string[]): Promise<void>;
   removeLabels?(emailId: string, labels: string[]): Promise<void>;

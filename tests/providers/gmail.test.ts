@@ -102,6 +102,7 @@ const mockMessagesSend = vi.fn();
 const mockMessagesTrash = vi.fn();
 const mockMessagesDelete = vi.fn();
 const mockMessagesModify = vi.fn();
+const mockMessagesInsert = vi.fn();
 const mockAttachmentsGet = vi.fn();
 const mockThreadsGet = vi.fn();
 const mockDraftsCreate = vi.fn();
@@ -121,6 +122,7 @@ vi.mock('googleapis', () => ({
           trash: mockMessagesTrash,
           delete: mockMessagesDelete,
           modify: mockMessagesModify,
+          insert: mockMessagesInsert,
           attachments: { get: mockAttachmentsGet },
         },
         threads: { get: mockThreadsGet },
@@ -171,6 +173,7 @@ function resetMocks() {
   mockMessagesTrash.mockResolvedValue({ data: {} });
   mockMessagesDelete.mockResolvedValue({ data: {} });
   mockMessagesModify.mockResolvedValue({ data: {} });
+  mockMessagesInsert.mockResolvedValue({ data: { id: 'inserted-1', threadId: 'thread-inserted-1' } });
   mockAttachmentsGet.mockResolvedValue({ data: { data: Buffer.from('file-content').toString('base64url'), size: 12 } });
   mockThreadsGet.mockResolvedValue({ data: mockThread });
   mockDraftsCreate.mockResolvedValue({ data: { id: 'draft-1', message: { id: 'msg-draft-1' } } });
@@ -291,6 +294,83 @@ describe('GmailAdapter', () => {
       });
       const emails = await adapter.search({ from: 'nobody@example.com' });
       expect(emails).toHaveLength(0);
+    });
+
+    it('honors offset by paging through the id list and windowing', async () => {
+      // Page 1: ids 0-2 with a nextPageToken, page 2: ids 3-4, no token.
+      mockMessagesList
+        .mockResolvedValueOnce({
+          data: {
+            messages: [{ id: 'm0' }, { id: 'm1' }, { id: 'm2' }],
+            nextPageToken: 'page2',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: { messages: [{ id: 'm3' }, { id: 'm4' }] },
+        });
+      // Each get returns a message echoing the requested id
+      mockMessagesGet.mockImplementation(async ({ id }: { id: string }) => ({
+        data: { ...mockMessageMetadata, id },
+      }));
+
+      const emails = await adapter.search({ offset: 3, limit: 2 });
+
+      // The second page must have been requested with the pageToken cursor
+      expect(mockMessagesList).toHaveBeenCalledWith(
+        expect.objectContaining({ pageToken: 'page2' }),
+      );
+      // Only the windowed ids (offset 3, limit 2) are fetched in full
+      expect(emails.map((e) => e.id)).toEqual(['m3', 'm4']);
+      expect(mockMessagesGet).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns empty when offset exceeds available results', async () => {
+      mockMessagesList.mockResolvedValueOnce({
+        data: { messages: [{ id: 'm0' }, { id: 'm1' }] },
+      });
+      const emails = await adapter.search({ offset: 50, limit: 10 });
+      expect(emails).toHaveLength(0);
+      expect(mockMessagesGet).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('raw transfer primitives', () => {
+    it('getRawMessage returns decoded MIME bytes', async () => {
+      const rawMime = 'From: a@b.com\r\nSubject: Hi\r\n\r\nBody';
+      mockMessagesGet.mockResolvedValueOnce({
+        data: { raw: Buffer.from(rawMime).toString('base64url') },
+      });
+
+      const buf = await adapter.getRawMessage('msg-123');
+      expect(mockMessagesGet).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'msg-123', format: 'raw' }),
+      );
+      expect(buf.toString('utf-8')).toBe(rawMime);
+    });
+
+    it('appendRawMessage inserts MIME with a resolved label id', async () => {
+      const raw = Buffer.from('From: a@b.com\r\nSubject: Hi\r\n\r\nBody');
+      const res = await adapter.appendRawMessage(raw, 'Work');
+
+      expect(mockMessagesInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'me',
+          internalDateSource: 'dateHeader',
+          requestBody: { labelIds: ['Label_1'] }, // "Work" resolves to Label_1
+          media: expect.objectContaining({ mimeType: 'message/rfc822' }),
+        }),
+      );
+      expect(res.id).toBe('inserted-1');
+    });
+
+    it('appendRawMessage defaults to INBOX and applies unread/starred flags', async () => {
+      const raw = Buffer.from('x');
+      await adapter.appendRawMessage(raw, undefined, { read: false, starred: true });
+
+      const call = mockMessagesInsert.mock.calls[0][0];
+      expect(call.requestBody.labelIds).toContain('INBOX');
+      expect(call.requestBody.labelIds).toContain('UNREAD');
+      expect(call.requestBody.labelIds).toContain('STARRED');
     });
   });
 

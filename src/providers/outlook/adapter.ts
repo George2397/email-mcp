@@ -257,6 +257,52 @@ export class OutlookAdapter implements EmailProvider {
     });
   }
 
+  async getRawMessage(emailId: string, _sourceFolder?: string): Promise<Buffer> {
+    this.ensureClient();
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(emailId)}/$value`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    if (!res.ok) {
+      throw new Error(`Graph $value fetch failed for ${emailId}: HTTP ${res.status}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  async appendRawMessage(
+    raw: Buffer,
+    targetFolder?: string,
+    flags?: { read?: boolean; starred?: boolean },
+  ): Promise<{ id: string }> {
+    this.ensureClient();
+    const endpoint = targetFolder
+      ? `https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(await this.resolveFolder(targetFolder))}/messages`
+      : 'https://graph.microsoft.com/v1.0/me/messages';
+
+    // Graph imports an RFC822 message when the body is base64 MIME with a text/plain content type.
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+        'Content-Type': 'text/plain',
+      },
+      body: raw.toString('base64'),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Graph MIME import failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+    }
+    const data: any = await res.json().catch(() => ({}));
+
+    // Imported messages default to unread; apply requested read/starred state best-effort.
+    if (flags && data.id && (flags.read !== undefined || flags.starred !== undefined)) {
+      try {
+        await this.markEmail(data.id, flags);
+      } catch { /* best-effort */ }
+    }
+    return { id: data.id || '' };
+  }
+
   async deleteEmail(emailId: string, permanent?: boolean, _sourceFolder?: string): Promise<void> {
     const client = this.ensureClient();
     if (permanent) {

@@ -103,7 +103,7 @@ npx @marlinjai/email-mcp setup
 # Optionally enter SMTP host and port for sending
 ```
 
-## Available Tools (24)
+## Available Tools (25)
 
 ### Account Management (4)
 
@@ -134,11 +134,12 @@ npx @marlinjai/email-mcp setup
 | `email_draft_create` | Save a draft without sending |
 | `email_draft_list` | List all drafts |
 
-### Organization (7)
+### Organization (8)
 
 | Tool | Description |
 |------|-------------|
 | `email_move` | Move an email to a different folder. Supports `sourceFolder` for IMAP/iCloud |
+| `email_transfer` | Move or copy emails **between accounts**, preserving the original message (sender, date, threading) via raw MIME transfer. `deleteAfter=true` trashes the source only after a confirmed import (safe cross-account move) |
 | `email_delete` | Delete an email (trash or permanent). Supports `sourceFolder` for IMAP/iCloud |
 | `email_mark` | Mark as read/unread, starred, or flagged. Supports `sourceFolder` for IMAP/iCloud |
 | `email_label` | Add/remove labels (Gmail only) |

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-06-13
+
+### Added
+- **`email_transfer` tool** — move or copy emails between accounts (e.g. iCloud/Outlook into Gmail) while preserving the original message intact (sender, date, threading) by transferring the raw MIME. With `deleteAfter=true` the source copy is trashed only after a confirmed import, making it a safe cross-account move. Backed by new optional provider primitives `getRawMessage()` / `appendRawMessage()` implemented for Gmail (messages.get raw / messages.insert), IMAP+iCloud (FETCH source / APPEND), and Outlook (Graph `$value` / MIME import).
+
+### Fixed
+- **Gmail search `offset` was ignored**, so paginating an inbox returned the same first page every time. Gmail's API has no numeric offset (only an opaque `pageToken`), so `search()` now pages forward through the lightweight message-id list until it reaches `offset + limit` and fetches full bodies only for that window. IMAP and Outlook already honored `offset`.
+
 ## [1.2.8] - 2026-03-16
 
 ### Fixed

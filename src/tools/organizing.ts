@@ -191,6 +191,74 @@ export function registerOrganizingTools(server: McpServer, accountManager: Accou
     },
   );
 
+  // --- email_transfer (cross-account) ---
+  server.tool(
+    'email_transfer',
+    'Move or copy emails BETWEEN accounts, preserving the original message intact (sender, date, threading) by transferring the raw MIME. Fetches each message from the source account and imports it into the target account. With deleteAfter=true the source copy is sent to trash only after a confirmed import, making this a safe cross-account move.',
+    {
+      sourceAccountId: z.string().describe('Account to read messages from'),
+      targetAccountId: z.string().describe('Account to import messages into'),
+      emailIds: z.array(z.string()).min(1).describe('Source email IDs to transfer'),
+      targetFolder: z.string().optional().describe('Destination folder/label in the target account (Gmail label id or name; IMAP/Outlook folder name). Defaults to INBOX.'),
+      sourceFolder: z.string().optional().describe('Source folder (required for IMAP/iCloud when emails are not in INBOX)'),
+      deleteAfter: z.boolean().optional().describe('Send the source copy to trash after a successful import. Default false (copy, leaving the original in place).'),
+      markRead: z.boolean().optional().describe('Mark imported messages as read in the target. Default: provider default (usually unread).'),
+    },
+    async (args) => {
+      try {
+        const source = await accountManager.getProvider(args.sourceAccountId);
+        const target = await accountManager.getProvider(args.targetAccountId);
+
+        if (!source.getRawMessage) {
+          return jsonResult({ success: false, error: 'Source provider does not support raw message export' });
+        }
+        if (!target.appendRawMessage) {
+          return jsonResult({ success: false, error: 'Target provider does not support raw message import' });
+        }
+
+        const flags = args.markRead !== undefined ? { read: args.markRead } : undefined;
+
+        const transferred: Array<{ sourceId: string; targetId: string }> = [];
+        const failed: Array<{ id: string; error: string }> = [];
+        const deleted: string[] = [];
+        const deleteFailed: Array<{ id: string; error: string }> = [];
+
+        for (const id of args.emailIds) {
+          let targetId: string;
+          try {
+            const raw = await source.getRawMessage(id, args.sourceFolder);
+            const res = await target.appendRawMessage(raw, args.targetFolder, flags);
+            targetId = res.id;
+            transferred.push({ sourceId: id, targetId });
+          } catch (e: any) {
+            failed.push({ id, error: e.message });
+            continue; // never delete the source when the import failed
+          }
+
+          if (args.deleteAfter) {
+            try {
+              await source.deleteEmail(id, false, args.sourceFolder);
+              deleted.push(id);
+            } catch (e: any) {
+              deleteFailed.push({ id, error: e.message });
+            }
+          }
+        }
+
+        return jsonResult({
+          success: true,
+          transferred: transferred.length,
+          deleted: deleted.length,
+          ...(failed.length ? { failedCount: failed.length } : {}),
+          ...(deleteFailed.length ? { deleteFailedCount: deleteFailed.length } : {}),
+          details: { transferred, failed, deleted, deleteFailed },
+        });
+      } catch (error: any) {
+        return jsonResult({ success: false, error: error.message });
+      }
+    },
+  );
+
   // --- email_label ---
   server.tool(
     'email_label',

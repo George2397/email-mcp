@@ -589,6 +589,38 @@ export class ImapAdapter implements EmailProvider {
     }
   }
 
+  async getRawMessage(emailId: string, sourceFolder?: string): Promise<Buffer> {
+    if (!this.client) throw new Error('Not connected');
+    const folder = sourceFolder ? await this.resolveFolder(sourceFolder) : 'INBOX';
+    let lock;
+    try {
+      lock = await this.client.getMailboxLock(folder);
+    } catch (error: any) {
+      throw formatImapError(error, `Failed to open folder "${folder}"`);
+    }
+    try {
+      const msg = await this.client.fetchOne(String(emailId), { source: true, uid: true }, { uid: true });
+      if (!msg || !msg.source) throw new Error(`Email ${emailId} not found in "${folder}"`);
+      return msg.source;
+    } finally {
+      lock.release();
+    }
+  }
+
+  async appendRawMessage(
+    raw: Buffer,
+    targetFolder?: string,
+    flags?: { read?: boolean; starred?: boolean },
+  ): Promise<{ id: string }> {
+    if (!this.client) throw new Error('Not connected');
+    const folder = targetFolder ? await this.resolveFolder(targetFolder) : 'INBOX';
+    const imapFlags: string[] = [];
+    if (flags?.read) imapFlags.push('\\Seen');
+    if (flags?.starred) imapFlags.push('\\Flagged');
+    const result = await this.client.append(folder, raw, imapFlags);
+    return { id: String((result as any)?.uid ?? '') };
+  }
+
   async batchDelete(emailIds: string[], permanent?: boolean, sourceFolder?: string): Promise<BatchResult> {
     if (!this.client) throw new Error('Not connected');
     const result: BatchResult = { succeeded: [], failed: [] };

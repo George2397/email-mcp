@@ -384,6 +384,35 @@ describe('ImapAdapter send, move, delete, mark, createFolder', () => {
     expect(client.messageMove).toHaveBeenCalledWith('123', 'Archive', { uid: true });
   });
 
+  it('getRawMessage fetches the source bytes from the given folder', async () => {
+    mockFetchMessages = [createMockMessage(7, { subject: 'Raw me', text: 'uid-7 raw' })];
+    const buf = await adapter.getRawMessage('7', 'INBOX');
+    const client = (adapter as any).client;
+    expect(client.fetchOne).toHaveBeenCalledWith('7', { source: true, uid: true }, { uid: true });
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(buf.toString()).toContain('Raw me');
+  });
+
+  it('getRawMessage throws when the message is missing', async () => {
+    const client = (adapter as any).client;
+    client.fetchOne.mockResolvedValueOnce(null);
+    await expect(adapter.getRawMessage('999', 'INBOX')).rejects.toThrow(/not found/);
+  });
+
+  it('appendRawMessage appends to the resolved folder with flags', async () => {
+    const raw = Buffer.from('Subject: Hi\r\n\r\nbody');
+    const res = await adapter.appendRawMessage(raw, 'Archive', { read: true, starred: true });
+    const client = (adapter as any).client;
+    expect(client.append).toHaveBeenCalledWith('Archive', raw, ['\\Seen', '\\Flagged']);
+    expect(res.id).toBe('100'); // mock append returns { uid: 100 }
+  });
+
+  it('appendRawMessage defaults to INBOX with no flags', async () => {
+    await adapter.appendRawMessage(Buffer.from('x'));
+    const client = (adapter as any).client;
+    expect(client.append).toHaveBeenCalledWith('INBOX', expect.any(Buffer), []);
+  });
+
   it('deleteEmail moves to Trash by default', async () => {
     await adapter.deleteEmail('456');
     const client = (adapter as any).client;
