@@ -38,6 +38,7 @@ export interface EmailProvider {
 
   sendEmail(params: SendEmailParams): Promise<{ id: string; threadId?: string }>;
   createDraft(params: SendEmailParams): Promise<{ id: string }>;
+  updateDraft?(draftId: string, params: SendEmailParams): Promise<{ id: string }>;
   listDrafts(limit?: number, offset?: number): Promise<Email[]>;
 
   moveEmail(emailId: string, targetFolder: string, sourceFolder?: string): Promise<void>;

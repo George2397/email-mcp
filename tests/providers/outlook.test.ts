@@ -516,6 +516,38 @@ describe('OutlookAdapter', () => {
     });
   });
 
+  describe('updateDraft', () => {
+    it('patches the existing Outlook draft', async () => {
+      const mockDraftRequest = createMockGraphRequest({ id: 'draft-123' });
+      mockApiRequests.set('/me/messages/draft-123', mockDraftRequest);
+
+      await adapter.connect({
+        id: 'outlook-1',
+        name: 'Test',
+        provider: 'outlook',
+        email: 'test@outlook.com',
+        oauth: { access_token: 'token', refresh_token: 'rt', expiry: '' },
+      });
+
+      const result = await adapter.updateDraft('draft-123', {
+        to: [{ email: 'bob@test.com' }],
+        subject: 'Updated Draft',
+        body: { html: '<p>Updated body</p>' },
+      });
+
+      expect(result.id).toBe('draft-123');
+      expect(mockDraftRequest.patch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'Updated Draft',
+          body: { contentType: 'html', content: '<p>Updated body</p>' },
+          toRecipients: [{ emailAddress: { name: undefined, address: 'bob@test.com' } }],
+          ccRecipients: [],
+          bccRecipients: [],
+        }),
+      );
+    });
+  });
+
   describe('listDrafts', () => {
     it('fetches messages from Drafts folder', async () => {
       const mockDraftsRequest = createMockGraphRequest({
@@ -554,6 +586,7 @@ describe('OutlookAdapter', () => {
       const drafts = await adapter.listDrafts(10, 0);
 
       expect(drafts).toHaveLength(1);
+      expect(drafts[0].draftId).toBe('draft-1');
       expect(drafts[0].flags.draft).toBe(true);
       expect(drafts[0].subject).toBe('Draft email');
       expect(mockDraftsRequest.top).toHaveBeenCalledWith(10);

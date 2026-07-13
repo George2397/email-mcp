@@ -221,6 +221,21 @@ export class GmailAdapter implements EmailProvider {
     return { id: res.data.id || '' };
   }
 
+  async updateDraft(draftId: string, params: SendEmailParams): Promise<{ id: string }> {
+    const gmail = this.ensureConnected();
+    const raw = this.buildRfc2822(params);
+
+    const res = await gmail.users.drafts.update({
+      userId: 'me',
+      id: draftId,
+      requestBody: {
+        message: { raw },
+      },
+    });
+
+    return { id: res.data.id || draftId };
+  }
+
   async listDrafts(limit?: number, _offset?: number): Promise<Email[]> {
     const gmail = this.ensureConnected();
 
@@ -239,7 +254,10 @@ export class GmailAdapter implements EmailProvider {
         format: 'full',
       });
       if (full.data.message) {
-        emails.push(mapGmailMessage(full.data.message, this.accountId));
+        emails.push({
+          ...mapGmailMessage(full.data.message, this.accountId),
+          draftId: draft.id!,
+        });
       }
     }
 
@@ -496,6 +514,13 @@ export class GmailAdapter implements EmailProvider {
 
   private buildRfc2822(params: SendEmailParams): string {
     const lines: string[] = [];
+    const encodeHeader = (value: string) =>
+      /[^\x00-\x7F]/.test(value)
+        ? `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`
+        : value;
+    const encodeBody = (value: string) =>
+      Buffer.from(value, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+
     lines.push(`From: ${this.email}`);
     lines.push(
       `To: ${params.to.map((c) => (c.name ? `"${c.name}" <${c.email}>` : c.email)).join(', ')}`,
@@ -506,7 +531,7 @@ export class GmailAdapter implements EmailProvider {
     if (params.bcc?.length) {
       lines.push(`Bcc: ${params.bcc.map((c) => c.email).join(', ')}`);
     }
-    lines.push(`Subject: ${params.subject}`);
+    lines.push(`Subject: ${encodeHeader(params.subject)}`);
     if (params.inReplyTo) {
       lines.push(`In-Reply-To: ${params.inReplyTo}`);
     }
@@ -514,9 +539,36 @@ export class GmailAdapter implements EmailProvider {
       lines.push(`References: ${params.references.join(' ')}`);
     }
     lines.push('MIME-Version: 1.0');
-    lines.push('Content-Type: text/plain; charset=UTF-8');
-    lines.push('');
-    lines.push(params.body.text || params.body.html || '');
+
+    const text = params.body.text;
+    const html = params.body.html;
+
+    if (text && html) {
+      const boundary = `__alt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}__`;
+      lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+      lines.push('');
+      lines.push(`--${boundary}`);
+      lines.push('Content-Type: text/plain; charset=UTF-8');
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push('');
+      lines.push(encodeBody(text));
+      lines.push(`--${boundary}`);
+      lines.push('Content-Type: text/html; charset=UTF-8');
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push('');
+      lines.push(encodeBody(html));
+      lines.push(`--${boundary}--`);
+    } else if (html) {
+      lines.push('Content-Type: text/html; charset=UTF-8');
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push('');
+      lines.push(encodeBody(html));
+    } else {
+      lines.push('Content-Type: text/plain; charset=UTF-8');
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push('');
+      lines.push(encodeBody(text || ''));
+    }
 
     return Buffer.from(lines.join('\r\n')).toString('base64url');
   }

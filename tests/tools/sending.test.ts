@@ -39,6 +39,7 @@ function makeMockProvider(overrides: Partial<EmailProvider> = {}): EmailProvider
     getAttachment: vi.fn(),
     sendEmail: vi.fn().mockResolvedValue({ id: 'sent-1', threadId: 'thread-1' }),
     createDraft: vi.fn().mockResolvedValue({ id: 'draft-1' }),
+    updateDraft: vi.fn().mockResolvedValue({ id: 'draft-1' }),
     listDrafts: vi.fn().mockResolvedValue([]),
     moveEmail: vi.fn(),
     deleteEmail: vi.fn(),
@@ -363,6 +364,52 @@ describe('Sending tools', () => {
       });
 
       expect(mockProvider.listDrafts).toHaveBeenCalledWith(undefined, undefined);
+    });
+  });
+
+  describe('email_draft_update', () => {
+    it('is registered', () => {
+      expect(hasRegisteredTool(server, 'email_draft_update')).toBe(true);
+    });
+
+    it('replaces a draft through the provider', async () => {
+      const result = await callTool(server, 'email_draft_update', {
+        accountId: 'acct-1',
+        draftId: 'draft-1',
+        to: [{ email: 'bob@example.com' }],
+        cc: [{ email: 'carol@example.com' }],
+        subject: 'Updated Subject',
+        body: { html: '<p>Updated body</p>' },
+      });
+
+      expect(accountManager.getProvider).toHaveBeenCalledWith('acct-1');
+      expect(mockProvider.updateDraft).toHaveBeenCalledWith(
+        'draft-1',
+        expect.objectContaining({
+          to: [{ email: 'bob@example.com' }],
+          cc: [{ email: 'carol@example.com' }],
+          subject: 'Updated Subject',
+          body: { html: '<p>Updated body</p>' },
+        }),
+      );
+
+      expect(JSON.parse(result.content[0].text)).toEqual({ id: 'draft-1' });
+    });
+
+    it('returns a clear error for providers without draft updates', async () => {
+      mockProvider.updateDraft = undefined;
+
+      const result = await callTool(server, 'email_draft_update', {
+        accountId: 'acct-1',
+        draftId: 'draft-1',
+        to: [{ email: 'bob@example.com' }],
+        subject: 'Updated Subject',
+        body: { text: 'Updated body' },
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: 'Draft updates are not supported for imap accounts',
+      });
     });
   });
 

@@ -37,6 +37,8 @@ export interface AttachmentMeta {
 
 export interface Email {
   id: string;
+  /** Provider draft identifier. For Gmail this differs from the message id. */
+  draftId?: string;
   accountId: string;
   threadId?: string;
   folder: string;

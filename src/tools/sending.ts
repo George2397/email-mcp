@@ -194,6 +194,43 @@ export function registerSendingTools(server: McpServer, accountManager: AccountM
     },
   );
 
+  // --- email_draft_update ---
+  server.tool(
+    'email_draft_update',
+    'Replace the recipients, subject, and body of an existing email draft (Gmail and Outlook only)',
+    {
+      accountId: z.string(),
+      draftId: z.string(),
+      to: z.array(ContactSchema),
+      cc: z.array(ContactSchema).optional(),
+      bcc: z.array(ContactSchema).optional(),
+      subject: z.string(),
+      body: BodySchema,
+    },
+    async (args) => {
+      try {
+        const provider = await accountManager.getProvider(args.accountId);
+        if (!provider.updateDraft) {
+          return jsonResult({
+            error: `Draft updates are not supported for ${provider.providerType} accounts`,
+          });
+        }
+
+        const params: SendEmailParams = {
+          to: args.to,
+          cc: args.cc,
+          bcc: args.bcc,
+          subject: args.subject,
+          body: args.body,
+        };
+        const result = await provider.updateDraft(args.draftId, params);
+        return jsonResult(result);
+      } catch (error: any) {
+        return jsonResult({ error: error.message });
+      }
+    },
+  );
+
   // --- email_draft_list ---
   server.tool(
     'email_draft_list',

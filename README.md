@@ -103,7 +103,7 @@ npx @marlinjai/email-mcp setup
 # Optionally enter SMTP host and port for sending
 ```
 
-## Available Tools (25)
+## Available Tools (26)
 
 ### Account Management (4)
 
@@ -124,7 +124,7 @@ npx @marlinjai/email-mcp setup
 | `email_get_thread` | Get an entire email thread/conversation |
 | `email_get_attachment` | Download a specific attachment by ID (returns base64 data) |
 
-### Sending & Drafts (5)
+### Sending & Drafts (6)
 
 | Tool | Description |
 |------|-------------|
@@ -132,6 +132,7 @@ npx @marlinjai/email-mcp setup
 | `email_reply` | Reply to an email (supports reply-all, preserves threading) |
 | `email_forward` | Forward an email to new recipients |
 | `email_draft_create` | Save a draft without sending |
+| `email_draft_update` | Replace a Gmail or Outlook draft's recipients, subject, and body using the `draftId` returned by `email_draft_list` |
 | `email_draft_list` | List all drafts |
 
 ### Organization (8)

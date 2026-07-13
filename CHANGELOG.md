@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`email_draft_update` tool** — replace the recipients, subject, and body of Gmail and Outlook drafts. `email_draft_list` now returns a provider `draftId` without changing the existing message `id`.
+
+### Fixed
+- Gmail messages and drafts now preserve HTML bodies and RFC 2047-encode non-ASCII subjects instead of flattening HTML into plain text.
+
 ## [1.3.0] - 2026-06-13
 
 ### Added

@@ -232,6 +232,20 @@ export class OutlookAdapter implements EmailProvider {
     return { id: result.id };
   }
 
+  async updateDraft(draftId: string, params: SendEmailParams): Promise<{ id: string }> {
+    const client = this.ensureClient();
+    const message = this.buildGraphMessage(params);
+
+    // Draft updates replace the full compose state, so omitted CC/BCC values clear them.
+    message.ccRecipients ??= [];
+    message.bccRecipients ??= [];
+
+    const result = await client
+      .api(`/me/messages/${encodeURIComponent(draftId)}`)
+      .patch(message);
+    return { id: result.id || draftId };
+  }
+
   async listDrafts(limit?: number, offset?: number): Promise<Email[]> {
     const client = this.ensureClient();
     let request = client.api('/me/mailFolders/drafts/messages');
@@ -246,7 +260,10 @@ export class OutlookAdapter implements EmailProvider {
     request = request.orderby('receivedDateTime desc');
 
     const response = await request.get();
-    return (response.value || []).map((msg: any) => mapGraphMessage(msg, this.accountId));
+    return (response.value || []).map((msg: any) => ({
+      ...mapGraphMessage(msg, this.accountId),
+      draftId: msg.id,
+    }));
   }
 
   async moveEmail(emailId: string, targetFolder: string, _sourceFolder?: string): Promise<void> {

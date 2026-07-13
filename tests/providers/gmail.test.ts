@@ -106,6 +106,7 @@ const mockMessagesInsert = vi.fn();
 const mockAttachmentsGet = vi.fn();
 const mockThreadsGet = vi.fn();
 const mockDraftsCreate = vi.fn();
+const mockDraftsUpdate = vi.fn();
 const mockDraftsList = vi.fn();
 const mockDraftsGet = vi.fn();
 
@@ -126,7 +127,12 @@ vi.mock('googleapis', () => ({
           attachments: { get: mockAttachmentsGet },
         },
         threads: { get: mockThreadsGet },
-        drafts: { create: mockDraftsCreate, list: mockDraftsList, get: mockDraftsGet },
+        drafts: {
+          create: mockDraftsCreate,
+          update: mockDraftsUpdate,
+          list: mockDraftsList,
+          get: mockDraftsGet,
+        },
       },
     }),
   },
@@ -177,6 +183,7 @@ function resetMocks() {
   mockAttachmentsGet.mockResolvedValue({ data: { data: Buffer.from('file-content').toString('base64url'), size: 12 } });
   mockThreadsGet.mockResolvedValue({ data: mockThread });
   mockDraftsCreate.mockResolvedValue({ data: { id: 'draft-1', message: { id: 'msg-draft-1' } } });
+  mockDraftsUpdate.mockResolvedValue({ data: { id: 'draft-1', message: { id: 'msg-draft-2' } } });
   mockDraftsList.mockResolvedValue({
     data: { drafts: [{ id: 'draft-1', message: { id: 'msg-draft-1' } }] },
   });
@@ -437,6 +444,41 @@ describe('GmailAdapter', () => {
         }),
       );
     });
+
+    it('preserves HTML bodies and encodes non-ASCII subjects', async () => {
+      await adapter.sendEmail({
+        to: [{ email: 'bob@example.com' }],
+        subject: 'Καλημέρα',
+        body: { text: 'Plain body', html: '<p>HTML body</p>' },
+      });
+
+      const raw = mockMessagesSend.mock.calls[0][0].requestBody.raw;
+      const message = Buffer.from(raw, 'base64url').toString('utf8');
+
+      expect(message).toContain(
+        `Subject: =?UTF-8?B?${Buffer.from('Καλημέρα').toString('base64')}?=`,
+      );
+      expect(message).toContain('Content-Type: multipart/alternative;');
+      expect(message).toContain('Content-Type: text/plain; charset=UTF-8');
+      expect(message).toContain('Content-Type: text/html; charset=UTF-8');
+      expect(message).toContain(Buffer.from('Plain body').toString('base64'));
+      expect(message).toContain(Buffer.from('<p>HTML body</p>').toString('base64'));
+    });
+
+    it('sends an HTML-only body as HTML instead of literal plain text', async () => {
+      await adapter.sendEmail({
+        to: [{ email: 'bob@example.com' }],
+        subject: 'HTML only',
+        body: { html: '<strong>Formatted</strong>' },
+      });
+
+      const raw = mockMessagesSend.mock.calls[0][0].requestBody.raw;
+      const message = Buffer.from(raw, 'base64url').toString('utf8');
+
+      expect(message).toContain('Content-Type: text/html; charset=UTF-8');
+      expect(message).toContain(Buffer.from('<strong>Formatted</strong>').toString('base64'));
+      expect(message).not.toContain('Content-Type: text/plain; charset=UTF-8');
+    });
   });
 
   describe('createDraft', () => {
@@ -452,10 +494,32 @@ describe('GmailAdapter', () => {
     });
   });
 
+  describe('updateDraft', () => {
+    it('replaces a draft through the Gmail drafts API', async () => {
+      const result = await adapter.updateDraft('draft-1', {
+        to: [{ email: 'bob@example.com' }],
+        cc: [{ email: 'carol@example.com' }],
+        subject: 'Updated Draft',
+        body: { html: '<p>Updated content</p>' },
+      });
+
+      expect(result.id).toBe('draft-1');
+      expect(mockDraftsUpdate).toHaveBeenCalledWith({
+        userId: 'me',
+        id: 'draft-1',
+        requestBody: {
+          message: { raw: expect.any(String) },
+        },
+      });
+    });
+  });
+
   describe('listDrafts', () => {
     it('lists drafts', async () => {
       const drafts = await adapter.listDrafts();
       expect(drafts).toHaveLength(1);
+      expect(drafts[0].id).toBe('msg-123');
+      expect(drafts[0].draftId).toBe('draft-1');
     });
   });
 
